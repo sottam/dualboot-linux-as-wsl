@@ -1,0 +1,33 @@
+From 8e24ea99b5727e06223b3158fb37cb35d805d2bd Mon Sep 17 00:00:00 2001
+From: Alonso Matos <github@sttm.com.br>
+Date: Sat, 24 Oct 2026 12:03:11 -0300
+Subject: [PATCH 3/6] X1 spike: attach the authorized physical root as the
+ service (cold start without elevation)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/windows/service/exe/WslCoreVm.cpp | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/src/windows/service/exe/WslCoreVm.cpp b/src/windows/service/exe/WslCoreVm.cpp
+index 150cc73..d41bac7 100644
+--- a/src/windows/service/exe/WslCoreVm.cpp
++++ b/src/windows/service/exe/WslCoreVm.cpp
+@@ -1364,11 +1364,13 @@ std::shared_ptr<LxssRunningInstance> WslCoreVm::CreateInstance(
+         THROW_HR_IF_MSG(E_INVALIDARG, !root.Valid, "Incomplete X1 physical root authorization");
+         THROW_HR_IF_MSG(E_ACCESSDENIED, GetTokenSidString(m_userToken.get()) != root.UserSid, "X1 physical root is authorized for another user");
+ 
+-        const auto diskPath = ResolvePhysicalRoot(root);
+-
+-        // The pass-through path keeps the elevation requirement of wsl --mount for the user token.
++        // The administrator-owned HKLM authorization, bound to this user and to the disk identity, stands in for the
++        // per-call elevation that wsl --mount requires, so identity resolution and the pass-through attach run as the
++        // service rather than with the (possibly unelevated) user token.
+         // N.B. Spike limitation: a failed launch leaves the disk attached until the VM shuts down.
+-        lun = AttachDiskLockHeld(diskPath.c_str(), DiskType::PassThrough, MountFlags::None, {}, false, m_userToken.get());
++        auto runAsSelf = wil::run_as_self();
++        const auto diskPath = ResolvePhysicalRoot(root);
++        lun = AttachDiskLockHeld(diskPath.c_str(), DiskType::PassThrough, MountFlags::None, {}, false, nullptr);
+ 
+         // The PARTUUID travels as its on-disk GPT bytes; GUID memory layout matches the GPT entry layout.
+         const auto* partitionBytes = reinterpret_cast<const uint8_t*>(&root.PartitionGuid);

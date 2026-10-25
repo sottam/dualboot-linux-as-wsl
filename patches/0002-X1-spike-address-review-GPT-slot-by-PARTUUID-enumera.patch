@@ -1,0 +1,315 @@
+From ffb21c79d2cf62d44eef88b1718950ad844abea4 Mon Sep 17 00:00:00 2001
+From: Alonso Matos <github@sttm.com.br>
+Date: Fri, 23 Oct 2026 00:47:45 -0300
+Subject: [PATCH 2/6] X1 spike: address review (GPT slot by PARTUUID,
+ enumeration, strict parsing)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/linux/init/main.cpp                     | 86 ++++++++++++++++++---
+ src/windows/service/exe/LxssCreateProcess.h |  1 +
+ src/windows/service/exe/LxssUserSession.cpp | 46 ++++++-----
+ src/windows/service/exe/WslCoreVm.cpp       | 44 +++++++----
+ 4 files changed, 133 insertions(+), 44 deletions(-)
+
+diff --git a/src/linux/init/main.cpp b/src/linux/init/main.cpp
+index c593975..5cd2598 100644
+--- a/src/linux/init/main.cpp
++++ b/src/linux/init/main.cpp
+@@ -2283,7 +2283,10 @@ void ProcessLaunchInitMessage(
+ 
+         if (*PhysicalRoot != '\0')
+         {
+-            THROW_ERRNO_IF(EINVAL, Message->MountDeviceType != LxMiniInitMountDeviceTypeLun || (Message->Flags & LxMiniInitMessageFlagCreateOverlayFs));
++            THROW_ERRNO_IF(
++                EINVAL,
++                Message->MountDeviceType != LxMiniInitMountDeviceTypeLun ||
++                    (Message->Flags & (LxMiniInitMessageFlagCreateOverlayFs | LxMiniInitMessageFlagMountReadOnly)));
+             THROW_LAST_ERROR_IF(MountPhysicalRoot(Message->DeviceId, PhysicalRoot, DISTRO_PATH, FsType, MountOptions) < 0);
+         }
+         else
+@@ -3772,13 +3775,14 @@ int MountPhysicalRoot(unsigned int Lun, const char* PhysicalRoot, const char* Ta
+ Routine Description:
+ 
+     X1: mounts the root partition of a pass-through physical disk. The service already matched the disk identity and
+-    PARTUUID on Windows; this routine checks the ext4 superblock UUID before mounting and the mount source after.
++    PARTUUID on Windows; this routine locates the GPT slot with that PARTUUID inside the LUN, checks the ext4
++    superblock UUID before mounting and the mount source after.
+ 
+ Arguments:
+ 
+     Lun - Supplies the LUN of the pass-through disk.
+ 
+-    PhysicalRoot - Supplies "<partition number>:<ext4 uuid as 32 lowercase hex digits>".
++    PhysicalRoot - Supplies "<PARTUUID as its 16 on-disk GPT bytes>:<ext4 uuid>", both as 32 lowercase hex digits.
+ 
+     Target - Supplies the target of the mount.
+ 
+@@ -3794,15 +3798,79 @@ Return Value:
+ 
+ try
+ {
++    const auto IsHex = [](std::string_view Value) {
++        return Value.size() == 32 && std::ranges::all_of(Value, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
++    };
++
++    const auto ToHex = [](const uint8_t* Bytes, size_t Size) {
++        std::string Hex;
++        for (size_t Index = 0; Index < Size; Index++)
++        {
++            Hex += std::format("{:02x}", Bytes[Index]);
++        }
++
++        return Hex;
++    };
++
+     const std::string_view Spec{PhysicalRoot};
+-    const auto Separator = Spec.find(':');
+-    THROW_ERRNO_IF(EINVAL, Separator == Spec.npos || Separator == 0 || Spec.size() - Separator - 1 != 32);
++    THROW_ERRNO_IF(EINVAL, Spec.size() != 65 || Spec[32] != ':' || !IsHex(Spec.substr(0, 32)) || !IsHex(Spec.substr(33)));
++
++    const std::string ExpectedPartUuid{Spec.substr(0, 32)};
++    const std::string ExpectedUuid{Spec.substr(33)};
++
++    //
++    // Locate the GPT slot with the authorized PARTUUID. Linux names partitions after their slot index, which can
++    // differ from the Windows partition number.
++    //
++
++    const auto DiskPath = GetLunDevicePath(Lun);
++    WaitForBlockDevice(DiskPath.c_str());
++
++    unsigned int Partition = 0;
++    {
++        wil::unique_fd Disk{open(DiskPath.c_str(), (O_RDONLY | O_CLOEXEC))};
++        THROW_LAST_ERROR_IF(!Disk);
++
++        int SectorSize = 0;
++        THROW_LAST_ERROR_IF(ioctl(Disk.get(), BLKSSZGET, &SectorSize) < 0);
++        THROW_ERRNO_IF(EINVAL, SectorSize < 512 || SectorSize > 4096);
++
++        std::vector<uint8_t> Header(SectorSize);
++        THROW_ERRNO_IF(EIO, pread(Disk.get(), Header.data(), Header.size(), SectorSize) != static_cast<ssize_t>(Header.size()));
++        THROW_ERRNO_IF(EINVAL, memcmp(Header.data(), "EFI PART", 8) != 0);
++
++        uint64_t EntriesLba{};
++        uint32_t EntryCount{};
++        uint32_t EntrySize{};
++        memcpy(&EntriesLba, Header.data() + 72, sizeof(EntriesLba));
++        memcpy(&EntryCount, Header.data() + 80, sizeof(EntryCount));
++        memcpy(&EntrySize, Header.data() + 84, sizeof(EntrySize));
++        THROW_ERRNO_IF(EINVAL, EntryCount == 0 || EntryCount > 1024 || EntrySize < 128 || EntrySize > 4096);
+ 
+-    const auto Partition = std::stoul(std::string{Spec.substr(0, Separator)});
+-    const std::string ExpectedUuid{Spec.substr(Separator + 1)};
+-    THROW_ERRNO_IF(EINVAL, Partition == 0);
++        std::vector<uint8_t> Entries(static_cast<size_t>(EntryCount) * EntrySize);
++        THROW_ERRNO_IF(
++            EIO, pread(Disk.get(), Entries.data(), Entries.size(), static_cast<off_t>(EntriesLba * SectorSize)) != static_cast<ssize_t>(Entries.size()));
++
++        constexpr std::string_view LinuxFilesystemType = "af3dc60f838472478e793d69d8477de4";
++        for (uint32_t Index = 0; Index < EntryCount; Index++)
++        {
++            const auto* Entry = Entries.data() + static_cast<size_t>(Index) * EntrySize;
++            if (ToHex(Entry + 16, 16) == ExpectedPartUuid)
++            {
++                THROW_ERRNO_IF(EEXIST, Partition != 0);
++                THROW_ERRNO_IF(EINVAL, ToHex(Entry, 16) != LinuxFilesystemType);
++                Partition = Index + 1;
++            }
++        }
++
++        if (Partition == 0)
++        {
++            LOG_ERROR("Physical root PARTUUID not found on {}", DiskPath);
++            THROW_ERRNO(ENOENT);
++        }
++    }
+ 
+-    const auto DevicePath = std::format("{}{}", GetLunDevicePath(Lun), Partition);
++    const auto DevicePath = std::format("{}{}", DiskPath, Partition);
+     WaitForBlockDevice(DevicePath.c_str());
+ 
+     {
+diff --git a/src/windows/service/exe/LxssCreateProcess.h b/src/windows/service/exe/LxssCreateProcess.h
+index 7f9080b..3a11fbf 100644
+--- a/src/windows/service/exe/LxssCreateProcess.h
++++ b/src/windows/service/exe/LxssCreateProcess.h
+@@ -131,6 +131,7 @@ typedef struct _LXSS_PHYSICAL_ROOT
+     GUID PartitionGuid;
+     std::string Ext4Uuid; // 32 lowercase hex digits, no separators.
+     std::wstring UserSid;
++    bool Valid; // False when the HKLM key exists but is unreadable or incomplete; launch is then refused.
+ } LXSS_PHYSICAL_ROOT;
+ 
+ typedef struct _LXSS_DISTRO_CONFIGURATION
+diff --git a/src/windows/service/exe/LxssUserSession.cpp b/src/windows/service/exe/LxssUserSession.cpp
+index 899d81c..70da5b5 100644
+--- a/src/windows/service/exe/LxssUserSession.cpp
++++ b/src/windows/service/exe/LxssUserSession.cpp
+@@ -4173,30 +4173,38 @@ LxssUserSessionImpl::s_GetDistributionConfiguration(const DistributionRegistrati
+         const auto keyPath = std::format(
+             L"SOFTWARE\\X1Unified\\PhysicalRoots\\{}", wsl::shared::string::GuidToString<wchar_t>(configuration.DistroId));
+ 
++        // N.B. An invalid authorization is recorded instead of thrown so enumeration of other distros keeps working;
++        // the launch of this distro is refused and never falls back to a VHD.
+         wil::unique_hkey physicalKey;
+         const auto status = RegOpenKeyExW(HKEY_LOCAL_MACHINE, keyPath.c_str(), 0, KEY_READ, &physicalKey);
+         if (status != ERROR_FILE_NOT_FOUND)
+         {
+-            THROW_IF_WIN32_ERROR(status);
+-
+-            const auto read = [&](LPCWSTR name) {
+-                return wsl::windows::common::registry::ReadString(physicalKey.get(), nullptr, name, L"");
+-            };
+-
+             LXSS_PHYSICAL_ROOT physical{};
+-            physical.Model = read(L"Model");
+-            physical.Serial = read(L"Serial");
+-            physical.UserSid = read(L"UserSid");
+-            const auto partitionGuid = wsl::shared::string::ToGuid(read(L"PartitionGuid"));
+-            physical.Ext4Uuid = wsl::windows::common::string::WideToMultiByte(read(L"Ext4Uuid"));
+-            THROW_HR_IF_MSG(
+-                E_INVALIDARG,
+-                !partitionGuid.has_value() || physical.Model.empty() || physical.Serial.empty() || physical.UserSid.empty() ||
+-                    physical.Ext4Uuid.size() != 32 ||
+-                    !std::ranges::all_of(physical.Ext4Uuid, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }),
+-                "Incomplete X1 physical root authorization");
+-
+-            physical.PartitionGuid = partitionGuid.value();
++            try
++            {
++                THROW_IF_WIN32_ERROR(status);
++
++                const auto read = [&](LPCWSTR name) {
++                    return wsl::windows::common::registry::ReadString(physicalKey.get(), nullptr, name, L"");
++                };
++
++                physical.Model = read(L"Model");
++                physical.Serial = read(L"Serial");
++                physical.UserSid = read(L"UserSid");
++                const auto partitionGuid = wsl::shared::string::ToGuid(read(L"PartitionGuid"));
++                physical.Ext4Uuid = wsl::windows::common::string::WideToMultiByte(read(L"Ext4Uuid"));
++                physical.Valid = partitionGuid.has_value() && !physical.Model.empty() && !physical.Serial.empty() &&
++                                 !physical.UserSid.empty() && physical.Ext4Uuid.size() == 32 &&
++                                 std::ranges::all_of(physical.Ext4Uuid, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
++
++                physical.PartitionGuid = partitionGuid.value_or(GUID{});
++            }
++            catch (...)
++            {
++                LOG_CAUGHT_EXCEPTION_MSG("Failed to read X1 physical root authorization");
++                physical.Valid = false;
++            }
++
+             configuration.PhysicalRoot = std::move(physical);
+         }
+     }
+diff --git a/src/windows/service/exe/WslCoreVm.cpp b/src/windows/service/exe/WslCoreVm.cpp
+index cb4cdc3..150cc73 100644
+--- a/src/windows/service/exe/WslCoreVm.cpp
++++ b/src/windows/service/exe/WslCoreVm.cpp
+@@ -81,10 +81,10 @@ std::wstring ReadDescriptorString(_In_ const std::vector<BYTE>& Buffer, _In_ DWO
+     return first == std::string::npos ? std::wstring{} : wsl::shared::string::MultiByteToWide(value.substr(first, last - first + 1));
+ }
+ 
+-// X1: resolve the authorized identity to a transient \\.\PhysicalDriveN path and GPT partition number.
++// X1: resolve the authorized identity to a transient \\.\PhysicalDriveN path.
+ // The disk must match model and serial exactly once, must not hold the Windows directory, and must contain exactly
+ // one partition with the authorized PARTUUID and the Linux filesystem type.
+-std::pair<std::wstring, ULONG> ResolvePhysicalRoot(_In_ const LXSS_PHYSICAL_ROOT& Root)
++std::wstring ResolvePhysicalRoot(_In_ const LXSS_PHYSICAL_ROOT& Root)
+ {
+     DWORD systemDisk{};
+     {
+@@ -103,25 +103,25 @@ std::pair<std::wstring, ULONG> ResolvePhysicalRoot(_In_ const LXSS_PHYSICAL_ROOT
+         systemDisk = extents.Extents[0].DiskNumber;
+     }
+ 
+-    std::optional<std::pair<std::wstring, ULONG>> match;
+-    for (DWORD index = 0; index < 64; index++)
++    // N.B. A disk that exists but cannot be inspected aborts the resolution, so uniqueness is checked across every disk.
++    std::optional<std::wstring> match;
++    for (DWORD index = 0; index < 256; index++)
+     {
+         auto path = std::format(L"\\\\.\\PhysicalDrive{}", index);
+         const wil::unique_hfile disk{
+             CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr)};
+         if (!disk)
+         {
++            const auto error = GetLastError();
++            THROW_WIN32_IF_MSG(error, error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND, "Failed to open %ls", path.c_str());
+             continue;
+         }
+ 
+         STORAGE_PROPERTY_QUERY query{StorageDeviceProperty, PropertyStandardQuery};
+         std::vector<BYTE> descriptor(4096);
+         DWORD bytes{};
+-        if (!DeviceIoControl(
+-                disk.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), descriptor.data(), static_cast<DWORD>(descriptor.size()), &bytes, nullptr))
+-        {
+-            continue;
+-        }
++        THROW_IF_WIN32_BOOL_FALSE(DeviceIoControl(
++            disk.get(), IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), descriptor.data(), static_cast<DWORD>(descriptor.size()), &bytes, nullptr));
+ 
+         const auto* header = reinterpret_cast<const STORAGE_DEVICE_DESCRIPTOR*>(descriptor.data());
+         if (ReadDescriptorString(descriptor, bytes, header->ProductIdOffset) != Root.Model ||
+@@ -144,24 +144,26 @@ std::pair<std::wstring, ULONG> ResolvePhysicalRoot(_In_ const LXSS_PHYSICAL_ROOT
+         const auto* layout = reinterpret_cast<const DRIVE_LAYOUT_INFORMATION_EX*>(layoutBuffer.data());
+         THROW_HR_IF_MSG(E_UNEXPECTED, layout->PartitionStyle != PARTITION_STYLE_GPT, "X1 physical root disk is not GPT");
+ 
+-        std::optional<ULONG> partitionNumber;
++        // N.B. Windows partition numbers can differ from Linux GPT slots, so only presence and type are checked here;
++        // mini_init locates the slot by PARTUUID inside the attached LUN.
++        bool found = false;
+         for (DWORD entry = 0; entry < layout->PartitionCount; entry++)
+         {
+             const auto& partition = layout->PartitionEntry[entry];
+             if (partition.PartitionStyle == PARTITION_STYLE_GPT && IsEqualGUID(partition.Gpt.PartitionId, Root.PartitionGuid))
+             {
+-                THROW_HR_IF_MSG(E_UNEXPECTED, partitionNumber.has_value(), "X1 PARTUUID is duplicated");
++                THROW_HR_IF_MSG(E_UNEXPECTED, found, "X1 PARTUUID is duplicated");
+                 THROW_HR_IF_MSG(
+                     E_UNEXPECTED,
+                     !IsEqualGUID(partition.Gpt.PartitionType, c_linuxFilesystemPartitionType),
+                     "X1 root partition is not a Linux filesystem partition");
+ 
+-                partitionNumber = partition.PartitionNumber;
++                found = true;
+             }
+         }
+ 
+-        THROW_HR_IF_MSG(E_NOT_SET, !partitionNumber.has_value() || partitionNumber.value() == 0, "X1 root partition not found");
+-        match.emplace(std::move(path), partitionNumber.value());
++        THROW_HR_IF_MSG(E_NOT_SET, !found, "X1 root partition not found");
++        match = std::move(path);
+     }
+ 
+     THROW_HR_IF_MSG(E_NOT_SET, !match.has_value(), "X1 physical root disk not found");
+@@ -1359,13 +1361,23 @@ std::shared_ptr<LxssRunningInstance> WslCoreVm::CreateInstance(
+         THROW_HR_IF_MSG(E_NOTIMPL, MessageType != LxMiniInitMessageLaunchInit, "X1 physical root supports launch only");
+ 
+         const auto& root = Configuration.PhysicalRoot.value();
++        THROW_HR_IF_MSG(E_INVALIDARG, !root.Valid, "Incomplete X1 physical root authorization");
+         THROW_HR_IF_MSG(E_ACCESSDENIED, GetTokenSidString(m_userToken.get()) != root.UserSid, "X1 physical root is authorized for another user");
+ 
+-        const auto [diskPath, partitionNumber] = ResolvePhysicalRoot(root);
++        const auto diskPath = ResolvePhysicalRoot(root);
+ 
+         // The pass-through path keeps the elevation requirement of wsl --mount for the user token.
++        // N.B. Spike limitation: a failed launch leaves the disk attached until the VM shuts down.
+         lun = AttachDiskLockHeld(diskPath.c_str(), DiskType::PassThrough, MountFlags::None, {}, false, m_userToken.get());
+-        physicalRoot = std::format("{}:{}", partitionNumber, root.Ext4Uuid);
++
++        // The PARTUUID travels as its on-disk GPT bytes; GUID memory layout matches the GPT entry layout.
++        const auto* partitionBytes = reinterpret_cast<const uint8_t*>(&root.PartitionGuid);
++        for (size_t index = 0; index < sizeof(GUID); index++)
++        {
++            physicalRoot += std::format("{:02x}", partitionBytes[index]);
++        }
++
++        physicalRoot += std::format(":{}", root.Ext4Uuid);
+     }
+     else
+     {

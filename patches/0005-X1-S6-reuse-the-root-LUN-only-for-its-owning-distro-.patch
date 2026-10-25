@@ -1,0 +1,88 @@
+From fd62c8e5c56055598b057a1e7b07ecdebfe98862 Mon Sep 17 00:00:00 2001
+From: Alonso Matos <github@sttm.com.br>
+Date: Sat, 24 Oct 2026 13:12:52 -0300
+Subject: [PATCH 5/6] X1 S6: reuse the root LUN only for its owning distro,
+ refuse unregister while authorized, normalize runtime ext4 bits
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/linux/init/main.cpp                     |  4 ++--
+ src/windows/service/exe/LxssUserSession.cpp |  5 +++++
+ src/windows/service/exe/WslCoreVm.cpp       | 12 +++++++++---
+ src/windows/service/exe/WslCoreVm.h         |  1 +
+ 4 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/src/linux/init/main.cpp b/src/linux/init/main.cpp
+index 2538628..031b3cb 100644
+--- a/src/linux/init/main.cpp
++++ b/src/linux/init/main.cpp
+@@ -3943,8 +3943,8 @@ try
+         const uint32_t Compat = Read32(0x5c);
+         const uint32_t Incompat = Read32(0x60);
+         const uint32_t RoCompat = Read32(0x64);
+-        if (Compat != ExpectedCompat || (Incompat & ~IncompatRecover) != ExpectedIncompat ||
+-            (RoCompat & ~RoCompatOrphanPresent) != ExpectedRoCompat)
++        if (Compat != ExpectedCompat || (Incompat & ~IncompatRecover) != (ExpectedIncompat & ~IncompatRecover) ||
++            (RoCompat & ~RoCompatOrphanPresent) != (ExpectedRoCompat & ~RoCompatOrphanPresent))
+         {
+             LOG_ERROR(
+                 "Physical root ext4 features {:08x}/{:08x}/{:08x} differ from the reviewed gate {:08x}/{:08x}/{:08x}",
+diff --git a/src/windows/service/exe/LxssUserSession.cpp b/src/windows/service/exe/LxssUserSession.cpp
+index d892f1c..07a3302 100644
+--- a/src/windows/service/exe/LxssUserSession.cpp
++++ b/src/windows/service/exe/LxssUserSession.cpp
+@@ -2471,6 +2471,11 @@ HRESULT LxssUserSessionImpl::UnregisterDistribution(_In_ LPCGUID DistroGuid)
+             registration = DistributionRegistration::Open(lxssKey.get(), *DistroGuid);
+             configuration = s_GetDistributionConfiguration(registration);
+ 
++            // X1: a physical root is unregistered only after an administrator removes its HKLM authorization, so the
++            // registration is never orphaned from (or silently detached from) its authorization.
++            THROW_HR_IF_MSG(
++                E_ACCESSDENIED, configuration.PhysicalRoot.has_value(), "X1 physical root: remove the HKLM authorization before unregistering");
++
+             // Log telemetry about the distribution being removed.
+             WSL_LOG_TELEMETRY(
+                 "UnregisterDistributionBegin", PDT_ProductAndServiceUsage, TraceLoggingValue(configuration.Name.c_str(), "name"));
+diff --git a/src/windows/service/exe/WslCoreVm.cpp b/src/windows/service/exe/WslCoreVm.cpp
+index f96e6bf..c78ee6c 100644
+--- a/src/windows/service/exe/WslCoreVm.cpp
++++ b/src/windows/service/exe/WslCoreVm.cpp
+@@ -1371,17 +1371,23 @@ std::shared_ptr<LxssRunningInstance> WslCoreVm::CreateInstance(
+         const auto diskPath = ResolvePhysicalRoot(root);
+ 
+         // A terminated instance of this distro leaves its root attached until the VM stops (as a distro VHD does).
+-        // Reuse that LUN; a disk attached by wsl --mount (User) is never taken over.
+-        // N.B. A failed launch also leaves the disk attached; the next launch reuses it the same way.
++        // Reuse that LUN only for the distro that attached it; a disk attached by wsl --mount (User) or by another
++        // registration is never taken over. The service only creates an instance for a distro that is not running.
++        // N.B. A failed launch also leaves the disk attached; the next launch of the same distro reuses it.
+         const auto attached = m_attachedDisks.find({DiskType::PassThrough, diskPath});
+         if (attached != m_attachedDisks.end())
+         {
+-            THROW_HR_IF(WSL_E_DISK_ALREADY_ATTACHED, attached->first.User);
++            const auto owner = m_physicalRootOwners.find(diskPath);
++            THROW_HR_IF(
++                WSL_E_DISK_ALREADY_ATTACHED,
++                attached->first.User || owner == m_physicalRootOwners.end() || !IsEqualGUID(owner->second, Configuration.DistroId));
++
+             lun = attached->second.Lun;
+         }
+         else
+         {
+             lun = AttachDiskLockHeld(diskPath.c_str(), DiskType::PassThrough, MountFlags::None, {}, false, nullptr);
++            m_physicalRootOwners[diskPath] = Configuration.DistroId;
+         }
+ 
+         // The PARTUUID travels as its on-disk GPT bytes; GUID memory layout matches the GPT entry layout.
+diff --git a/src/windows/service/exe/WslCoreVm.h b/src/windows/service/exe/WslCoreVm.h
+index 2424820..19ec1df 100644
+--- a/src/windows/service/exe/WslCoreVm.h
++++ b/src/windows/service/exe/WslCoreVm.h
+@@ -312,6 +312,7 @@ private:
+     std::shared_ptr<LxssRunningInstance> m_systemDistro;
+     _Guarded_by_(m_lock) std::bitset<MAX_VHD_COUNT> m_lunBitmap;
+     _Guarded_by_(m_lock) std::map<AttachedDisk, DiskState> m_attachedDisks;
++    _Guarded_by_(m_lock) std::map<std::wstring, GUID> m_physicalRootOwners; // X1: pass-through disk -> distro that attached it.
+     std::tuple<std::uint32_t, std::uint32_t, std::uint32_t> m_kernelVersion;
+     std::wstring m_kernelVersionString;
+     bool m_seccompAvailable;

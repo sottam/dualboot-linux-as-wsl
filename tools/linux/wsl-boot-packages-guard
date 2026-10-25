@@ -1,0 +1,25 @@
+#!/bin/sh
+# dualboot-linux-as-wsl: refuse boot-chain package changes while running under WSL.
+#
+# Install as /usr/local/sbin/wsl-boot-packages-guard (0755) and enable with
+# /etc/apt/apt.conf.d/50wsl-boot-packages-guard:
+#     DPkg::Pre-Install-Pkgs { "/usr/local/sbin/wsl-boot-packages-guard"; };
+#     DPkg::Tools::Options::/usr/local/sbin/wsl-boot-packages-guard::Version "2";
+#
+# Why: under WSL the ESP is not mounted (the generator masks boot-efi.mount) and there is
+# no EFI NVRAM, so grub/shim/kernel postinst scripts would write into the root directory
+# instead of the ESP and leave the native boot with mismatched GRUB core and modules.
+# Upgrade these packages from the native boot instead. On bare metal this hook does nothing.
+# Set WSL_ALLOW_BOOT_PACKAGES=1 to override deliberately.
+
+[ "$(systemd-detect-virt --container 2>/dev/null)" = wsl ] || exit 0
+[ "${WSL_ALLOW_BOOT_PACKAGES:-0}" = 1 ] && exit 0
+
+# APT protocol version 2: header, blank line, then "<pkg> <old> <cmp> <new> <action-or-file>".
+blocked=$(sed '1,/^$/d' | awk '{print $1}' |
+    grep -E '^(grub|shim|linux-image|linux-signed|linux-generic|linux-headers-generic|linux-modules|initramfs-tools|dracut|systemd-boot|efibootmgr|fwupd|mokutil|sbsigntool)' |
+    sort -u)
+[ -z "$blocked" ] && exit 0
+echo "wsl-boot-packages-guard: refusing under WSL (boot chain, update these from the native boot):" >&2
+echo "$blocked" | sed 's/^/  /' >&2
+exit 1

@@ -1,0 +1,34 @@
+From 6480f91991d3ffe84c713849b920c358a7784677 Mon Sep 17 00:00:00 2001
+From: Alonso Matos <github@sttm.com.br>
+Date: Sat, 24 Oct 2026 13:54:41 -0300
+Subject: [PATCH 6/6] X1: block package updates unless X1_ALLOW_WSL_UPDATE=1
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/windows/common/install.cpp | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/windows/common/install.cpp b/src/windows/common/install.cpp
+index 75ea8e0..918ba92 100644
+--- a/src/windows/common/install.cpp
++++ b/src/windows/common/install.cpp
+@@ -344,6 +344,19 @@ void wsl::windows::common::install::MsiMessageCallback(INSTALLMESSAGE type, LPCW
+ 
+ int wsl::windows::common::install::UpdatePackage(bool PreRelease, bool Repair, bool CallerOwnsProcess)
+ {
++    // X1: this package is a local fork that boots a registered physical root. An upstream package would replace it
++    // and leave that distro unbootable, so every update path (wsl --update, repair, SDK) needs an explicit opt-in.
++    {
++        wchar_t allow[2]{};
++        if (GetEnvironmentVariableW(L"X1_ALLOW_WSL_UPDATE", allow, ARRAYSIZE(allow)) != 1 || allow[0] != L'1')
++        {
++            THROW_HR_WITH_USER_ERROR(
++                E_ACCESSDENIED,
++                std::wstring{L"This WSL is the X1 Unified Linux fork; updates are blocked. See docs/WSL-FORK-UPDATES.md "
++                             L"(set X1_ALLOW_WSL_UPDATE=1 only to replace the fork on purpose)."});
++        }
++    }
++
+     bool clearHandler = false;
+     auto cleanup = wil::scope_exit_log(WI_DIAGNOSTICS_INFO, [&] {
+         if (clearHandler)

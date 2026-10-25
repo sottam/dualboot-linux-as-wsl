@@ -1,0 +1,68 @@
+#!/bin/sh
+# dualboot-linux-as-wsl: systemd generator for a physical root booted as a WSL distro.
+#
+# Install as /etc/systemd/system-generators/wsl-physical-root (mode 0755, LF line endings).
+# On bare metal, and in any container that is not WSL, it exits without output. Under WSL it
+# writes only below /run: masks in the early generator directory (which take precedence over
+# /etc) for units that manage hardware, the desktop, the physical network, boot files or
+# firmware, plus a systemd-resolved drop-in for the WSL DNS tunnel. Nothing persistent changes,
+# so the native boot keeps its own configuration.
+#
+# Optional configuration (plain text, one item per line, '#' comments):
+#   /etc/wsl-physical-root/extra-masks   more units to mask under WSL
+#   /etc/wsl-physical-root/keep          units from the default list that must NOT be masked
+#   /etc/wsl-physical-root/dns           DNS server(s) for resolved under WSL (default 10.255.255.254,
+#                                        the WSL DNS tunnel; empty file = do not touch resolved)
+#
+# Rollback: delete this file.
+
+[ "$(/usr/bin/systemd-detect-virt --container 2>/dev/null)" = wsl ] || exit 0
+
+early="${2:-/run/systemd/generator.early}"
+conf=/etc/wsl-physical-root
+mkdir -p "$early" || exit 0
+
+list() { [ -r "$1" ] && sed -e 's/#.*//' -e 's/[[:space:]]//g' "$1" | grep -v '^$'; }
+
+defaults='
+    sddm.service gdm.service gdm3.service lightdm.service
+    gpu-manager.service setvtrgb.service console-setup.service keyboard-setup.service
+    plymouth-start.service plymouth-read-write.service plymouth-quit.service plymouth-quit-wait.service
+    getty@tty1.service
+    NetworkManager.service NetworkManager-dispatcher.service NetworkManager-wait-online.service
+    ModemManager.service wpa_supplicant.service networkd-dispatcher.service netplan-configure.service
+    systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service
+    openvpn.service avahi-daemon.service avahi-daemon.socket ufw.service firewalld.service
+    cloud-init-local.service cloud-init-main.service cloud-init-network.service cloud-init.service
+    cloud-config.service cloud-final.service cloud-init-hotplugd.socket
+    bluetooth.service power-profiles-daemon.service thermald.service switcheroo-control.service tlp.service
+    lm-sensors.service smartmontools.service kdump-tools.service multipathd.service
+    open-iscsi.service iscsid.socket open-vm-tools.service vgauth.service secureboot-db.service
+    tpm-udev.path udisks2.service lvm2-monitor.service blk-availability.service dm-event.socket
+    lvm2-lvmpolld.socket mdmonitor-oneshot.timer mdcheck_start.timer mdcheck_continue.timer
+    systemd-pstore.service chrony.service systemd-timesyncd.service
+    grub-initrd-fallback.service grub2-common.service grub-common.service finalrd.service
+    boot-efi.mount boot-efi.automount systemd-fsck-root.service
+    unattended-upgrades.service apt-daily.timer apt-daily-upgrade.timer packagekit.service
+    update-notifier-download.timer update-notifier-motd.timer motd-news.timer
+    fwupd.service fwupd-refresh.timer snapd.snap-repair.timer ua-timer.timer
+    ubuntu-advantage.service ua-reboot-cmds.service
+    apport.service apport-autoreport.path apport-autoreport.timer apport-forward.socket whoopsie.path
+    cups.service cups.socket cups.path cups-browsed.service
+    snapd.service snapd.socket snapd.seeded.service snapd.autoimport.service snapd.core-fixup.service
+    snapd.recovery-chooser-trigger.service
+'
+keep=$(list "$conf/keep")
+for unit in $defaults $(list "$conf/extra-masks"); do
+    case " $(echo $keep) " in *" $unit "*) continue ;; esac
+    ln -sf /dev/null "$early/$unit"
+done
+
+# DNS: the network manager is masked, so give resolved the WSL DNS tunnel. The native
+# /etc/resolv.conf (usually a symlink to the resolved stub) is left as installed.
+if [ -e "$conf/dns" ]; then dns=$(list "$conf/dns" | tr '\n' ' '); else dns=10.255.255.254; fi
+if [ -n "$dns" ]; then
+    mkdir -p /run/systemd/resolved.conf.d &&
+        printf '[Resolve]\nDNS=%s\nDomains=~.\n' "$dns" > /run/systemd/resolved.conf.d/50-wsl-physical-root.conf
+fi
+exit 0
