@@ -6,6 +6,8 @@ Sem copiar para VHD, sem chroot, sem nspawn.**
 
 [English](README.md) · guias técnicos em inglês na pasta [docs/](docs/)
 
+![Konsole do KDE aberto pelo WSLg como janela do Windows, rodando da partição física com systemd e Docker](docs/images/wslg-konsole-physical-root.png)
+
 > Status: protótipo funcionando em uma máquina (ThinkPad X1 Carbon Gen 6, Kubuntu 26.04 num
 > segundo NVMe, Windows 11, WSL 3.0.3). Substitui o serviço do WSL por um build com patches.
 > Leia a seção de segurança antes de testar.

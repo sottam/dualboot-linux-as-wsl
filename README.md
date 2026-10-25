@@ -5,6 +5,8 @@
 
 [Português](README.pt-BR.md)
 
+![KDE Konsole opened by WSLg as a Windows window, running from the physical root partition with systemd and Docker](docs/images/wslg-konsole-physical-root.png)
+
 > Status: working prototype on one machine (ThinkPad X1 Carbon Gen 6, Kubuntu 26.04 on a
 > second NVMe, Windows 11, WSL 3.0.3). It replaces the WSL service with a patched build.
 > Read [Safety](#safety) before trying it.
