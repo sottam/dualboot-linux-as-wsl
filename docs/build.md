@@ -43,7 +43,8 @@ holds `_Instances`, the installer's registration of your VS install.
 ```powershell
 git clone --branch 3.0.3 https://github.com/microsoft/WSL.git
 cd WSL
-git am path\to\dualboot-linux-as-wsl\patches\*.patch
+git am @((Get-ChildItem path\to\dualboot-linux-as-wsl\patches\*.patch | Sort-Object Name).FullName)
+if ($LASTEXITCODE) { throw 'git am failed' }
 cmake . -DCMAKE_BUILD_TYPE=Release
 cmake --build . --config Release --target msipackage -- /m
 # result: bin\x64\Release\wsl.msi

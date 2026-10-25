@@ -15,14 +15,18 @@ must not be touched. The same `/etc` has to keep working on bare metal.
 - Masks units by symlinking them to `/dev/null` in `/run/systemd/generator.early`, which
   takes precedence over `/etc`. Nothing in `/etc` is enabled or disabled.
 - Writes `/run/systemd/resolved.conf.d/50-wsl-physical-root.conf` with `DNS=10.255.255.254`
-  (the WSL DNS tunnel in NAT mode) so systemd-resolved works with the native
-  `resolv.conf → stub-resolv.conf` symlink untouched.
+  (the default WSL DNS tunnel address) so systemd-resolved works with the native
+  `resolv.conf → stub-resolv.conf` symlink untouched. This assumes systemd-resolved is the
+  resolver and DNS tunneling is on; otherwise set `/etc/wsl-physical-root/dns` (or an empty
+  file to skip the drop-in) and configure DNS yourself.
 
 Masked by default (only units that exist matter): display managers and GPU setup, Plymouth,
 `getty@tty1`, NetworkManager/ModemManager/wpa_supplicant/networkd/netplan, VPN and firewall
 services, cloud-init, Bluetooth/power/thermal/sensors/SMART, multipath/iSCSI/LVM monitors,
 udisks2, chrony/timesyncd (the VM clock is synced by Hyper-V), GRUB/initrd maintenance,
-**`boot-efi.mount`** and `systemd-fsck-root`, unattended upgrades and update timers, fwupd,
+**`boot-efi.mount`** and `systemd-fsck-root`, **every other fstab mount and swap** (unit
+names derived with `systemd-escape`, so only the root partition — the one that passed the
+ext4 gate — is mounted), unattended upgrades and update timers, fwupd,
 crash reporters, CUPS and snapd.
 
 Configuration in `/etc/wsl-physical-root/` (one item per line, `#` comments):
@@ -46,17 +50,17 @@ mountFsTab=false               # WSL init must not mount the ESP/swap from fstab
 default=<user>
 ```
 
-`mountFsTab=false` only stops WSL's init; systemd's fstab generator still creates
-`boot-efi.mount`, which is why the generator masks it.
+`mountFsTab=false` only stops WSL's init; systemd's fstab generator still creates mount
+units for every fstab line, which is why the generator masks all of them except the root.
 
 ## Boot-chain packages
 
 With the ESP unmounted and no EFI variables, a GRUB/shim/kernel upgrade inside WSL would
 write EFI files into the empty `/boot/efi` directory of the root filesystem. The native
 boot would then run an old GRUB core from the ESP with new modules from `/boot/grub` — a
-classic way to end up unbootable. `wsl-boot-packages-guard` (a dpkg pre-install hook)
-refuses `grub*`, `shim*`, `linux-image*`, `linux-signed*`, `linux-modules*`,
-`initramfs-tools`, `dracut`, `systemd-boot`, `efibootmgr`, `fwupd`, `mokutil` and
+classic way to end up unbootable. `wsl-boot-packages-guard` is an APT
+pre-install hook (not dpkg-wide: `dpkg -i` bypasses it) and refuses `grub*`, `shim*`,
+`linux-image*`, `linux-signed*`, `linux-modules*`, `initramfs-tools`, `dracut`, `systemd-boot`, `efibootmgr`, `fwupd`, `mokutil` and
 `sbsigntool` under WSL; upgrade them from the native boot. `WSL_ALLOW_BOOT_PACKAGES=1`
 overrides deliberately.
 

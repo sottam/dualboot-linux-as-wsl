@@ -9,12 +9,15 @@ Messages from mini_init land in the VM kernel log. Read them from any other runn
 | kmsg `ext4 features … differ from the reviewed gate` | filesystem features changed | check kernel support, re-register |
 | kmsg `does not have the authorized ext4 superblock` / `PARTUUID not found` | wrong or changed partition | check `Get-Partition`, re-register; do not force |
 | `X1 physical root disk not found` / `matches more than one disk` | disk absent, renamed or cloned | check `Get-Disk` model/serial |
+| `.wslconfig sets a custom kernel` (registration) | only the stock kernel is supported | remove `kernel=` |
+| `not shut down cleanly` (registration) | journal recovery pending or native hibernated | boot native, shut down fully |
+| `fstab mounts …` (installer) | unsupported layout | see [install.md](install.md#supported-setup) |
 | `X1 physical root identity matches the Windows disk` | authorization points at the system disk | fix the registration |
 | `WSL_E_DISK_ALREADY_ATTACHED` | disk attached by `wsl --mount` or another registration, or a failed launch | `wsl --shutdown` and retry |
 | `WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK` | running a build without patch 3 | install the full patch series |
 | `E_NOTIMPL` on export/move/resize/set-sparse/set-version | refused on purpose for a physical root | — |
 | `UnregisterDistro/E_ACCESSDENIED` | refused while authorized | delete the HKLM key as administrator first |
-| `wsl --update` refuses | patch 6 | see [updates.md](updates.md) |
+| `wsl --update` refuses (message mentions `docs/WSL-FORK-UPDATES.md`) | patch 6 | see [updates.md](updates.md) |
 | `systemctl is-system-running` → `degraded` | a desktop/hardware unit failed under WSL | `systemctl --failed`, add it to `/etc/wsl-physical-root/extra-masks`, `wsl --shutdown` |
 | No DNS inside WSL | resolved has no upstream | check `/run/systemd/resolved.conf.d/50-wsl-physical-root.conf`; with `networkingMode=mirrored` set the DNS in `/etc/wsl-physical-root/dns` |
 | Native hostname changed to the Windows name | booted once without `wsl.conf` | set `hostname=` in `/etc/wsl.conf`, restore `/etc/hostname` |

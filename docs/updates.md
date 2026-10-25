@@ -5,8 +5,11 @@ registered for. Both are deliberate.
 
 ## Protections
 
-- Patch 6 makes `wsl --update`, the package repair path and the SDK update refuse with a
-  message, unless `X1_ALLOW_WSL_UPDATE=1` is set in the environment.
+- Patch 6 makes `wsl --update` and the package repair path refuse with a message, unless
+  `X1_ALLOW_WSL_UPDATE=1` is set in the environment. Known gaps in v0.1: the WSLC SDK
+  first tries Windows Update (`RunUpdateFlow`) before reaching the guarded path, and the
+  refusal message names `docs/WSL-FORK-UPDATES.md` (this repository's page is
+  [updates.md](updates.md)). Both are fixed in the next patch revision.
 - Optional: `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Lxss\UpdateCheckPeriodMs = 0`
   (DWORD) disables the service's update notification (only active in official builds).
 - An official MSI installed by hand or by a third party is not blocked. If that happens
@@ -15,7 +18,8 @@ registered for. Both are deliberate.
 
 ## When a new WSL release comes out
 
-1. Rebase: `git checkout <new-tag>` in your WSL clone, `git am patches/*.patch`, resolve
+1. Rebase: `git checkout <new-tag>` in your WSL clone, apply the series (PowerShell does not
+   expand `*` for git: see [build.md](build.md#build)), resolve
    conflicts (the touched areas are `WslCoreVm.cpp`, `LxssUserSession.cpp`,
    `LxssCreateProcess.h`, `lxinitshared.h`, `src/linux/init/main.cpp`, `install.cpp`).
 2. Build and install ([build.md](build.md)).

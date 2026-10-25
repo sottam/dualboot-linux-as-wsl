@@ -45,16 +45,21 @@ destruir dados. O projeto tem várias travas: recusa o disco do Windows e parti�
 são Linux, confere identidade a cada boot, verifica as features do ext4 contra o código do
 kernel exato do WSL (kernel novo ou filesystem alterado bloqueiam o boot até um novo
 registro), recusa export/move/resize/unregister na distro física e impede atualizar
-GRUB/shim/kernel de dentro do WSL. Mesmo assim: tenha backup e um pendrive de boot.
-Modelo de ameaças em [docs/security.md](docs/security.md).
+GRUB/shim/kernel de dentro do WSL pelo APT. **Nunca hiberne** o Linux nativo: desligue
+por completo antes de entrar no Windows (o registro recusa filesystem que não foi
+desmontado de forma limpa). Só o layout suportado: GPT, raiz ext4 simples (sem
+LUKS/LVM/RAID) e fstab só com raiz, ESP e swap. Mesmo assim: tenha backup e um pendrive
+de boot. Modelo de ameaças em [docs/security.md](docs/security.md).
 
 ## Como usar
 
-1. Compile o WSL com os patches ([docs/build.md](docs/build.md)) — binários não são
+1. **No boot nativo do Linux**, rode `tools/linux/install-wsl-side.sh` (primeiro com
+   `--dry-run`) e desligue por completo.
+2. Compile o WSL com os patches ([docs/build.md](docs/build.md)) — binários não são
    publicados de propósito.
-2. Instale com `msiexec` e guarde o MSI oficial para rollback.
-3. Registre a partição com `tools/windows/Register-PhysicalRoot.ps1` (dry run por padrão).
-4. No primeiro boot, rode `tools/linux/install-wsl-side.sh` dentro da distro.
+3. Instale com `msiexec` e guarde o MSI oficial para rollback.
+4. Registre a partição com `tools/windows/Register-PhysicalRoot.ps1` (sem `-Apply` é dry run).
+5. Suba com `wsl -d <distro>`.
 
 Passo a passo completo, com conferências e rollback: [docs/install.md](docs/install.md).
 

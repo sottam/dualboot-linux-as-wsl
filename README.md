@@ -78,29 +78,36 @@ This boots your real disk read-write from a second kernel. Mistakes can destroy 
 - `wsl --export`, `--import` paths, `--manage --move/--resize/--set-sparse`,
   `--set-version` and `--unregister` are refused for the physical distro: there is no
   image, only your disk.
-- Boot-chain packages (GRUB, shim, kernels) must be upgraded from the native boot; a
-  dpkg hook refuses them under WSL.
+- Boot-chain packages (GRUB, shim, kernels) must be upgraded from the native boot; an
+  APT hook refuses them under WSL (`dpkg -i` is not covered).
+- **Never hibernate** the native system while the disk is used from WSL, and shut it down
+  fully before booting Windows. Registration refuses a filesystem that was not shut down
+  cleanly.
+- Supported layout only: GPT, plain ext4 root (no LUKS/LVM/RAID), fstab with just the
+  root, ESP and swap ([docs/install.md](docs/install.md#supported-setup)).
 - Have a backup and a live USB before trying. Threat model: [docs/security.md](docs/security.md).
 
 ## Quick start
 
-1. **Build** the patched WSL (Visual Studio 2022 + CMake; ~10 min on a fast desktop):
-   [docs/build.md](docs/build.md). No binaries are published on purpose.
-2. **Install** it over your WSL with `msiexec` and keep the official MSI for rollback.
-3. **Register** the partition from an elevated PowerShell (dry run by default):
+1. **On the native Linux boot**, prepare the root (dry run first), then shut down fully:
+
+   ```bash
+   sudo sh tools/linux/install-wsl-side.sh --user "$USER" --dry-run
+   sudo sh tools/linux/install-wsl-side.sh --user "$USER" --disable-hibernation
+   ```
+
+2. **Build** the patched WSL on Windows (Visual Studio 2022 + CMake; ~10 min on a fast
+   desktop): [docs/build.md](docs/build.md). No binaries are published on purpose.
+3. **Install** it over your WSL with `msiexec` and keep the official MSI for rollback.
+4. **Register** the partition from an elevated PowerShell (dry run without `-Apply`):
 
    ```powershell
    Get-Disk; Get-Partition -DiskNumber 1
+   .\tools\windows\Register-PhysicalRoot.ps1 -DiskNumber 1 -PartitionNumber 2 -DistroName MyLinux
    .\tools\windows\Register-PhysicalRoot.ps1 -DiskNumber 1 -PartitionNumber 2 -DistroName MyLinux -Apply
    ```
 
-4. **First boot** (without systemd) and install the WSL-only pieces inside the distro:
-
-   ```powershell
-   wsl -d MyLinux -u root -- sh /mnt/c/path/to/dualboot-linux-as-wsl/tools/linux/install-wsl-side.sh youruser
-   wsl --shutdown
-   wsl -d MyLinux
-   ```
+5. **Boot** it: `wsl -d MyLinux`.
 
 Step by step, with checks and rollback: [docs/install.md](docs/install.md).
 

@@ -52,8 +52,32 @@ defaults='
     snapd.service snapd.socket snapd.seeded.service snapd.autoimport.service snapd.core-fixup.service
     snapd.recovery-chooser-trigger.service
 '
+# Every fstab entry except the root: the native ESP, swap and any other filesystem must not
+# be mounted from the second kernel (only the root passed the ext4 gate). Unit names are
+# derived the way systemd-fstab-generator derives them.
+fstab_units() {
+    [ -r /etc/fstab ] || return 0
+    sed -e 's/#.*//' /etc/fstab | while read -r spec mp type _; do
+        [ -n "$spec" ] && [ -n "$mp" ] || continue
+        [ "$mp" = / ] && continue
+        if [ "$type" = swap ]; then
+            case "$spec" in
+                UUID=*) dev="/dev/disk/by-uuid/${spec#UUID=}" ;;
+                PARTUUID=*) dev="/dev/disk/by-partuuid/${spec#PARTUUID=}" ;;
+                LABEL=*) dev="/dev/disk/by-label/${spec#LABEL=}" ;;
+                PARTLABEL=*) dev="/dev/disk/by-partlabel/${spec#PARTLABEL=}" ;;
+                *) dev="$spec" ;;
+            esac
+            /usr/bin/systemd-escape --path --suffix=swap "$dev"
+        else
+            /usr/bin/systemd-escape --path --suffix=mount "$mp"
+            /usr/bin/systemd-escape --path --suffix=automount "$mp"
+        fi
+    done
+}
+
 keep=$(list "$conf/keep")
-for unit in $defaults $(list "$conf/extra-masks"); do
+for unit in $defaults $(fstab_units) $(list "$conf/extra-masks"); do
     case " $(echo $keep) " in *" $unit "*) continue ;; esac
     ln -sf /dev/null "$early/$unit"
 done

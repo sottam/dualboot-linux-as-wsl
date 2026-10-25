@@ -13,6 +13,12 @@ the public `install-wsl-side.sh`, generator and apt guard: systemd `running` wit
 units, DNS, Docker and the apt refusal all re-checked. The patches are the tested series
 (only the author e-mail in the headers differs).
 
+After an independent review the tools gained stricter preflight checks (supported
+layouts, unclean or hibernated filesystems, custom kernels, masking of every non-root
+fstab mount). Those revisions were tested with dry runs on this machine, a real
+install/uninstall on a scratch distro and the negative cases; the generator with fstab
+masking runs on the physical root.
+
 ## Boot and integration
 
 | Test | Result |
@@ -40,7 +46,7 @@ units, DNS, Docker and the apt refusal all re-checked. The patches are the teste
 | Authorization with another kernel release | boot refused before mount, kmsg explains |
 | `wsl --update` | refused |
 | Registration tool on the ESP / the Windows disk / a missing partition | refused |
-| apt reinstall of a boot-chain package under WSL | refused by the dpkg hook; ordinary packages pass |
+| apt reinstall of a boot-chain package under WSL | refused by the APT hook; ordinary packages pass |
 
 ## Native boot afterwards
 
