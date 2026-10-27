@@ -1,0 +1,12 @@
+[Unit]
+Description=Report unclean shutdowns and ext4 errors of the physical root (WSL only)
+ConditionVirtualization=wsl
+After=systemd-journald.service local-fs.target
+
+[Service]
+Type=oneshot
+# Exit 1 means findings were recorded; the unit stays successful so the boot is not marked degraded.
+ExecStart=-/usr/local/sbin/wsl-physical-root-check --boot
+
+[Install]
+WantedBy=multi-user.target

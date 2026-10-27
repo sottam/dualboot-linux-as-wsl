@@ -7,7 +7,8 @@
 #                                            [--no-package-guard] [--disable-hibernation]
 #
 # Checks that the layout is supported, then installs the systemd generator, the apt
-# boot-packages guard and /etc/wsl.conf. All of them are inert on the native boot. Every
+# boot-packages guard, the unclean-shutdown/ext4-error check (boot unit + login warning)
+# and /etc/wsl.conf. All of them are inert on the native boot. Every
 # file it replaces is backed up and every change is recorded in a manifest used by
 # uninstall-wsl-side.sh. Re-running is safe.
 set -eu
@@ -35,7 +36,8 @@ if [ "$virt" = wsl ]; then
 else
     [ -n "$host" ] || host=$(hostnamectl --static 2>/dev/null || cat /etc/hostname)
 fi
-for f in "$here/wsl-physical-root-generator" "$here/wsl-boot-packages-guard" "$here/../../examples/wsl.conf"; do
+for f in "$here/wsl-physical-root-generator" "$here/wsl-boot-packages-guard" "$here/wsl-physical-root-check" \
+         "$here/wsl-physical-root-check.service" "$here/wsl-physical-root-alert.sh" "$here/../../examples/wsl.conf"; do
     if grep -q "$(printf '\r')" "$f"; then problem "CRLF line endings in $f (convert to LF)"; fi
 done
 
@@ -72,6 +74,11 @@ put() { # put <src> <dst> <mode>
     install -D -m "$3" "$1" "$2"
 }
 put "$here/wsl-physical-root-generator" /etc/systemd/system-generators/wsl-physical-root 0755
+put "$here/wsl-physical-root-check" /usr/local/sbin/wsl-physical-root-check 0755
+put "$here/wsl-physical-root-check.service" /etc/systemd/system/wsl-physical-root-check.service 0644
+put "$here/wsl-physical-root-alert.sh" /etc/profile.d/wsl-physical-root-alert.sh 0644
+wants=/etc/systemd/system/multi-user.target.wants/wsl-physical-root-check.service
+[ -e "$wants" ] || { mkdir -p "${wants%/*}"; ln -s /etc/systemd/system/wsl-physical-root-check.service "$wants"; echo "created $wants" >> "$manifest"; }
 if [ "$guard" = 1 ]; then
     put "$here/wsl-boot-packages-guard" /usr/local/sbin/wsl-boot-packages-guard 0755
     t=$(mktemp); printf '%s\n' 'DPkg::Pre-Install-Pkgs { "/usr/local/sbin/wsl-boot-packages-guard"; };' \

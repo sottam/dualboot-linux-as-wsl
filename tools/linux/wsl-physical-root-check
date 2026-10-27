@@ -1,0 +1,49 @@
+#!/bin/sh
+# dualboot-linux-as-wsl: under WSL, report signs that the physical root was not shut down
+# cleanly or that ext4 found errors, so they are noticed before more is written.
+#
+#     wsl-physical-root-check --boot    scan this boot's kernel log, record and log findings
+#     wsl-physical-root-check --login   print a warning if the boot recorded findings or / is read-only
+#     wsl-physical-root-check --boot --kmsg <file>   scan <file> instead (tests)
+#
+# --boot runs from wsl-physical-root-check.service; --login from /etc/profile.d. Does nothing
+# on the native boot. Exit 1 when something was found.
+mode= kmsg=
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --boot|--login) mode=$1; shift ;;
+        --kmsg) kmsg=$2; shift 2 ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+done
+[ "$(systemd-detect-virt --container 2>/dev/null)" = wsl ] || [ -n "$kmsg" ] || exit 0
+alert=/run/wsl-physical-root/alert
+pattern='was not shut down cleanly|EXT4-fs error|EXT4-fs warning|Remounting filesystem read-only|Aborting journal|Structure needs cleaning'
+
+root_ro() { findmnt -no OPTIONS / | tr ',' '\n' | grep -qx -e ro -e emergency_ro; }
+
+case "$mode" in
+--boot)
+    if [ -n "$kmsg" ]; then found=$(grep -E "$pattern" "$kmsg")
+    else found=$(journalctl -k -b -o cat --no-pager 2>/dev/null | grep -E "$pattern"); fi
+    if root_ro; then found="$found
+root filesystem is mounted read-only"; fi
+    found=$(printf '%s\n' "$found" | sed '/^$/d')
+    [ -n "$found" ] || exit 0
+    if [ -z "$kmsg" ]; then
+        mkdir -p "${alert%/*}"; printf '%s\n' "$found" > "$alert"
+        printf '%s\n' "$found" | logger -p daemon.crit -t wsl-physical-root
+    else
+        printf '%s\n' "$found"
+    fi
+    exit 1 ;;
+--login)
+    if [ -s "$alert" ] || root_ro; then
+        printf '\033[1;31m%s\033[0m\n' "WARNING: the physical root had an unclean shutdown or ext4 errors in this boot." >&2
+        [ -s "$alert" ] && sed 's/^/  /' "$alert" >&2
+        root_ro && echo "  / is read-only now: write nothing, run 'wsl --shutdown' and see docs/troubleshooting.md." >&2
+        exit 1
+    fi ;;
+*) echo "usage: wsl-physical-root-check --boot | --login" >&2; exit 2 ;;
+esac
+exit 0

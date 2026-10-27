@@ -64,6 +64,16 @@ pre-install hook (not dpkg-wide: `dpkg -i` bypasses it) and refuses `grub*`, `sh
 `sbsigntool` under WSL; upgrade them from the native boot. `WSL_ALLOW_BOOT_PACKAGES=1`
 overrides deliberately.
 
+## Unclean shutdown and ext4 error check
+
+`wsl-physical-root-check.service` (WSL only, `ConditionVirtualization=wsl`) scans the
+kernel log of each WSL boot for `was not shut down cleanly`, `EXT4-fs error`,
+`Aborting journal` and `Remounting filesystem read-only`, and checks whether `/` is
+read-only. Findings go to the journal at `crit` priority and to
+`/run/wsl-physical-root/alert`; `/etc/profile.d/wsl-physical-root-alert.sh` prints them
+in red in every interactive shell of that boot (and whenever `/` is read-only). The
+unit never fails, so it does not mark the boot `degraded`.
+
 ## Side effects WSL still has on the root
 
 - `/init` (empty file): WSL bind-mounts its init there at every boot. Harmless natively.
