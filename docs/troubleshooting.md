@@ -18,6 +18,7 @@ Messages from mini_init land in the VM kernel log. Read them from any other runn
 | `E_NOTIMPL` on export/move/resize/set-sparse/set-version | refused on purpose for a physical root | — |
 | `UnregisterDistro/E_ACCESSDENIED` | refused while authorized | delete the HKLM key as administrator first |
 | `wsl --update` refuses (message mentions `docs/WSL-FORK-UPDATES.md`) | patch 6 | see [updates.md](updates.md) |
+| kmsg `EXT4-fs error … Remounting filesystem read-only`; journal says `Structure needs cleaning` | ext4 found inconsistent metadata (seen after `wsl --terminate`) | write nothing. `wsl --shutdown`; elevated `wsl --mount \.\PHYSICALDRIVE<n> --bare`; from another distro, as root: `e2fsck -fn` on the partition (it must not be mounted), keep an `e2image -Q` copy elsewhere, then `e2fsck -fy` and `e2fsck -fn` until it exits 0; `wsl --unmount` |
 | `systemctl is-system-running` → `degraded` | a desktop/hardware unit failed under WSL | `systemctl --failed`, add it to `/etc/wsl-physical-root/extra-masks`, `wsl --shutdown` |
 | No DNS inside WSL | resolved has no upstream | check `/run/systemd/resolved.conf.d/50-wsl-physical-root.conf`; with `networkingMode=mirrored` set the DNS in `/etc/wsl-physical-root/dns` |
 | Native hostname changed to the Windows name | booted once without `wsl.conf` | set `hostname=` in `/etc/wsl.conf`, restore `/etc/hostname` |

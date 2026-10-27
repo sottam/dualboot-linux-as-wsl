@@ -27,12 +27,12 @@ masking runs on the physical root.
 | Root mount | the physical partition (`/dev/sdX2`), no `discard`, `errors=remount-ro` |
 | `\\wsl.localhost\<distro>` cold start from Explorer/PowerShell | listing in ~4 s; files written from Windows owned by the Linux user |
 | VS Code 1.143 + Remote WSL 0.104 | connects cold (VM stopped) and warm; server lives on the physical home |
-| Docker Engine (data of the physical install) | starts with its storage guard; a container ran on the 6.18 kernel; `-p` port reachable on Windows `localhost` |
+| Docker Engine (data of the physical install) | starts on first use (`docker.socket`); a container ran on the 6.18 kernel; `-p` port reachable on Windows `localhost` |
 | WSLg | X11 and Wayland; KDE apps (kcalc) open as Windows windows; audio heard on Windows through `RDPSink` |
 | GPU | `GALLIUM_DRIVER=d3d12` → "D3D12 (Intel UHD Graphics 620)"; glxgears 19 FPS vs 139 FPS llvmpipe at 1600x900, so llvmpipe stays default |
 | Interop | Windows executables run from the distro |
 | DNS | systemd-resolved through the WSL DNS tunnel; native `resolv.conf` symlink untouched |
-| `wsl --terminate` then start again | root LUN reused |
+| `wsl --terminate` then start again | root LUN reused; **once (2026-10-26) this left ext4 with inconsistent bitmaps** and the root read-only — see [security.md](security.md#known-limits) |
 | Reboot Windows with the distro open | journal of that WSL boot ends with `poweroff.target` / "Shutting down" |
 | `wsl --shutdown` | full systemd poweroff; next mount without journal recovery |
 

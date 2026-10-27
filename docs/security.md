@@ -26,15 +26,22 @@
 
 ## Known limits
 
+- **Stop the physical distro with `wsl --shutdown`, not `wsl --terminate`.** On
+  2026-10-26 a `--terminate` followed by an immediate relaunch (which reuses the
+  attached disk) left the ext4 root with inconsistent block/inode bitmaps; the kernel
+  remounted it read-only and an offline `e2fsck` repaired it without data loss
+  ([troubleshooting](troubleshooting.md)). The cause in the LUN-reuse path is not
+  reproduced yet; until then `wsl --shutdown`, which detaches the disk, is the only
+  supported way to stop it.
+
 - No lease across users or VMs beyond the PassThrough attach itself.
 - If a launch fails after the attach, the disk stays attached until `wsl --shutdown`
   (the next launch of the same distro reuses it).
 - Between resolving the disk on Windows and reopening `\\.\PhysicalDriveN` for the attach
   there is a window in which a disk swap would go unnoticed on the Windows side; the
   Linux-side checks (PARTUUID, UUID, features, kernel) still apply before any mount.
-- Other distros in the same VM can see the block device in `/dev`. Mounting the same
-  partition again reuses the same kernel superblock (no corruption), but it is not an
-  access barrier.
+- Other distros in the same VM can see the block device in `/dev`; nothing stops them
+  from mounting the partition. Do not do that while the physical distro runs.
 - Disks numbered above `PhysicalDrive255` are not considered by the service's uniqueness check.
 - The WSLC SDK update path can still try Windows Update before the patch-6 guard (v0.1).
 - WSL forces the distro down about ten seconds after asking systemd to power off; stop
