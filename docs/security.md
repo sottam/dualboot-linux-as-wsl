@@ -36,8 +36,10 @@
   the partition is free; with it, 50 terminate/relaunch rounds under continuous writes
   and a unit that stops slower than WSL waits showed no overlap, no ext4 errors and a
   clean offline `e2fsck` (without it: overlap in every round, journal replay in 40 of
-  50, still no errors). The exact trigger of the 2026-10-26 corruption was not
-  reproduced, and terminate on a real disk has not been accepted yet.
+  50, still no errors). On the real disk, 10 rounds with a Docker container writing
+  continuously also showed no overlap and a clean offline `e2fsck`. The exact trigger
+  of the 2026-10-26 corruption was not reproduced; builds without patch 7 should only
+  be stopped with `wsl --shutdown`.
 
 - No lease across users or VMs beyond the PassThrough attach itself.
 - If a launch fails after the attach, the disk stays attached until `wsl --shutdown`

@@ -32,7 +32,7 @@ masking runs on the physical root.
 | GPU | `GALLIUM_DRIVER=d3d12` → "D3D12 (Intel UHD Graphics 620)"; glxgears 19 FPS vs 139 FPS llvmpipe at 1600x900, so llvmpipe stays default |
 | Interop | Windows executables run from the distro |
 | DNS | systemd-resolved through the WSL DNS tunnel; native `resolv.conf` symlink untouched |
-| `wsl --terminate` then start again | root LUN reused; **once (2026-10-26) this left ext4 with inconsistent bitmaps** and the root read-only. With patch 7: 50 rounds on a fixture VHD with continuous writes, mini_init waited 100–300 ms for the previous instance every time, no ext4 errors, clean offline `e2fsck` — see [security.md](security.md#known-limits) |
+| `wsl --terminate` then start again | root LUN reused; **once (2026-10-26) this left ext4 with inconsistent bitmaps** and the root read-only. With patch 7: 50 rounds on a fixture VHD with continuous writes, mini_init waited 100–300 ms for the previous instance every time, no ext4 errors, clean offline `e2fsck`; on the real disk, 10 rounds with Docker writing, same result — see [security.md](security.md#known-limits) |
 | Reboot Windows with the distro open | journal of that WSL boot ends with `poweroff.target` / "Shutting down" |
 | `wsl --shutdown` | full systemd poweroff; next mount without journal recovery |
 
