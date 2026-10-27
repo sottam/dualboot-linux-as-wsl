@@ -23,7 +23,7 @@ WSL do VS Code e o Docker continuam enxergando a *outra* distro.
 
 ## A solução
 
-Seis patches no WSL de código aberto (tag 3.0.3, ~500 linhas no serviço do Windows e no
+Sete patches no WSL de código aberto (tag 3.0.3, ~540 linhas no serviço do Windows e no
 `mini_init`) criam uma distro registrada cuja raiz é uma partição GPT de um disco anexado
 por PassThrough. A partição é montada **antes** do init do WSL — então todo o resto é o
 WSL original. Detalhes em [docs/architecture.md](docs/architecture.md).

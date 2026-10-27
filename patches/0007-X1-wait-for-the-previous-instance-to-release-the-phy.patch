@@ -1,0 +1,66 @@
+From 78e907b23ff417955f2e9178c16a237ac6f88874 Mon Sep 17 00:00:00 2001
+From: Alonso Matos <github@sttm.com.br>
+Date: Mon, 26 Oct 2026 23:32:39 -0300
+Subject: [PATCH] X1: wait for the previous instance to release the physical
+ root before mounting
+
+After wsl --terminate the previous instance keeps the root mounted until its
+namespace is torn down, which happens while the next launch is already reading
+the superblock (seen in every terminate/relaunch round of the fixture test and in
+the 2026-10-26 ext4 incident). Wait until the partition can be opened O_EXCL,
+up to 30 s, and refuse the launch with a clear message if it stays busy.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/linux/init/main.cpp | 35 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 35 insertions(+)
+
+diff --git a/src/linux/init/main.cpp b/src/linux/init/main.cpp
+index 031b3cb..5d646d4 100644
+--- a/src/linux/init/main.cpp
++++ b/src/linux/init/main.cpp
+@@ -3907,6 +3907,41 @@ try
+     const auto DevicePath = std::format("{}{}", DiskPath, Partition);
+     WaitForBlockDevice(DevicePath.c_str());
+ 
++    //
++    // After wsl --terminate the previous instance of this distro keeps the root mounted until its namespace is torn
++    // down, which happens while this launch is already running. Reading the superblock or mounting again before that
++    // last unmount finished lets two instances of the filesystem overlap. Wait until nothing holds the partition
++    // (O_EXCL fails with EBUSY while it is mounted) and refuse the launch if it stays busy.
++    //
++
++    {
++        constexpr auto ExclusiveTimeout = std::chrono::seconds(30);
++        const auto Start = std::chrono::steady_clock::now();
++        for (;;)
++        {
++            wil::unique_fd Exclusive{open(DevicePath.c_str(), (O_RDONLY | O_EXCL | O_CLOEXEC))};
++            if (Exclusive)
++            {
++                break;
++            }
++
++            THROW_LAST_ERROR_IF(errno != EBUSY);
++            if (std::chrono::steady_clock::now() - Start > ExclusiveTimeout)
++            {
++                LOG_ERROR("Physical root {} is still in use by a previous instance; run wsl --shutdown", DevicePath);
++                THROW_ERRNO(EBUSY);
++            }
++
++            std::this_thread::sleep_for(std::chrono::milliseconds(100));
++        }
++
++        const auto Waited = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - Start);
++        if (Waited.count() > 0)
++        {
++            LOG_WARNING("Physical root {} was released by the previous instance after {} ms", DevicePath, Waited.count());
++        }
++    }
++
+     {
+         wil::unique_fd Device{open(DevicePath.c_str(), (O_RDONLY | O_CLOEXEC))};
+         THROW_LAST_ERROR_IF(!Device);
+-- 
+2.49.0.windows.1
+

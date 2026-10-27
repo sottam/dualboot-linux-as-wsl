@@ -92,7 +92,7 @@ docker run --rm -p 8080:80 nginx   # http://localhost:8080 on Windows
 WSL powers the distro off when Windows logs off or reboots, but systemd gets about ten
 seconds before WSL forces it down. Before rebooting into the native system, **stop
 stateful workloads** (databases, containers) or run `wsl --shutdown` and wait for it to
-return. To stop the distro at any time use `wsl --shutdown`, never `wsl --terminate`
+return. To stop the distro prefer `wsl --shutdown`
 ([why](security.md#known-limits)). Then, on the native boot, run `bash tools/linux/native-check.sh`: it checks that
 the WSL pieces are inert and that the last WSL boots reached `poweroff.target` (exit 1 on
 failure, 2 if no WSL boot was found).

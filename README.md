@@ -59,7 +59,7 @@ stock WSL init ──► systemd of the physical install
                    + a WSL-only systemd generator (masks desktop/network/hardware units in /run)
 ```
 
-Six patches on top of WSL tag 3.0.3 (~500 lines, service + mini_init):
+Seven patches on top of WSL tag 3.0.3 (~540 lines, service + mini_init):
 [patches/](patches/). Design and code walkthrough: [docs/architecture.md](docs/architecture.md).
 
 The native boot is kept intact by putting every WSL difference behind a condition:

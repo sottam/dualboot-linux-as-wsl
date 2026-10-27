@@ -31,6 +31,7 @@ WSL already contains the other half: `wsl --mount` attaches a physical disk with
 | 4 | both | Move/Export/SetSparse/Resize/Compact/SetVersion refused (`E_NOTIMPL`); after `--terminate` the root LUN is reused; mini_init compares the superblock feature masks and `uname -r` with the authorized ones before mounting |
 | 5 | both | LUN reuse only for the distro that attached it; `--unregister` refused while authorized; runtime bits (`RECOVER`, `ORPHAN_PRESENT`) ignored on both sides |
 | 6 | client | `wsl --update`, package repair and the SDK update path refuse unless `X1_ALLOW_WSL_UPDATE=1` |
+| 7 | mini_init | before reading the superblock, wait until the partition can be opened `O_EXCL` (up to 30 s): after `--terminate` the previous instance only releases the root while the next launch is already running; refuse the launch if it stays busy |
 
 "X1" is the codename of the original project; the registry path is
 `HKLM\SOFTWARE\X1Unified\PhysicalRoots\{distro-guid}`.

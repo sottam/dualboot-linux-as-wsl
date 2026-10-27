@@ -26,13 +26,18 @@
 
 ## Known limits
 
-- **Stop the physical distro with `wsl --shutdown`, not `wsl --terminate`.** On
-  2026-10-26 a `--terminate` followed by an immediate relaunch (which reuses the
-  attached disk) left the ext4 root with inconsistent block/inode bitmaps; the kernel
-  remounted it read-only and an offline `e2fsck` repaired it without data loss
-  ([troubleshooting](troubleshooting.md)). The cause in the LUN-reuse path is not
-  reproduced yet; until then `wsl --shutdown`, which detaches the disk, is the only
-  supported way to stop it.
+- **Prefer `wsl --shutdown` to stop the physical distro.** On 2026-10-26 a
+  `--terminate` followed by an immediate relaunch (which reuses the attached disk) left
+  the ext4 root with inconsistent block/inode bitmaps; the kernel remounted it
+  read-only and an offline `e2fsck` repaired it without data loss
+  ([troubleshooting](troubleshooting.md)). A fixture test showed why the two can
+  overlap: after `--terminate` the previous instance keeps the root mounted until the
+  next launch is already reading its superblock. Patch 7 makes mini_init wait until
+  the partition is free; with it, 50 terminate/relaunch rounds under continuous writes
+  and a unit that stops slower than WSL waits showed no overlap, no ext4 errors and a
+  clean offline `e2fsck` (without it: overlap in every round, journal replay in 40 of
+  50, still no errors). The exact trigger of the 2026-10-26 corruption was not
+  reproduced, and terminate on a real disk has not been accepted yet.
 
 - No lease across users or VMs beyond the PassThrough attach itself.
 - If a launch fails after the attach, the disk stays attached until `wsl --shutdown`

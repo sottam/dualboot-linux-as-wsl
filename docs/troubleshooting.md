@@ -13,6 +13,7 @@ Messages from mini_init land in the VM kernel log. Read them from any other runn
 | `not shut down cleanly` (registration) | journal recovery pending or native hibernated | boot native, shut down fully |
 | `fstab mounts …` (installer) | unsupported layout | see [install.md](install.md#supported-setup) |
 | `X1 physical root identity matches the Windows disk` | authorization points at the system disk | fix the registration |
+| kmsg `Physical root … is still in use by a previous instance` | the previous instance did not release the root within 30 s (patch 7) | `wsl --shutdown` and start again |
 | `WSL_E_DISK_ALREADY_ATTACHED` | disk attached by `wsl --mount` or another registration, or a failed launch | `wsl --shutdown` and retry |
 | `WSL_E_ELEVATION_NEEDED_TO_MOUNT_DISK` | running a build without patch 3 | install the full patch series |
 | `E_NOTIMPL` on export/move/resize/set-sparse/set-version | refused on purpose for a physical root | — |
